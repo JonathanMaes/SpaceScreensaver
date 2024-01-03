@@ -4,212 +4,346 @@ NOTE: If there are not enough high-resolution images as compared to low-res imag
 """
 
 import cv2
-import json
 import numpy as np
 import os
-import psutil
 import random
 import scipy.ndimage as ndi
+import subprocess
+import sys
 import time
 import tkinter as tk
 import warnings
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageTk, UnidentifiedImageError
-warnings.simplefilter('ignore', Image.DecompressionBombWarning) # Ignore warning (i.e. dont warn for images between 90 and 179 MP)
 from ctypes import windll
+from collections import deque
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageTk, UnidentifiedImageError
+from settings import Settings, SettingsWindow
+from typing import List
+
+warnings.simplefilter('ignore', Image.DecompressionBombWarning) # Ignore warning (i.e. dont warn for images between 90 and 179 MP)
 windll.shcore.SetProcessDpiAwareness(1)
 
 
-class Options():
-    defaultDict = {
-        'directories': [r'E:\Space'],
-        'excluded_directories': [],
-        'only_high_res': True,
-        'interval_seconds': 1
-    }
-
-    def __init__(self, file='options.json'):
-        directory = os.path.expandvars(u"%APPDATA%\\Jonathan's Programma's\\SpaceScreensaver")
-        self.file = os.path.join(directory, file)
-        os.makedirs(directory, exist_ok=True)
-        if not os.path.exists(self.file): self.reset()
-        else: self.load()
-
-    def save(self):
-        with open(self.file, 'w') as optionsFile:
-            json.dump(self.options, optionsFile)
-
-    def load(self):
-        with open(self.file, 'r') as optionsFile:
-            self.options: dict = json.load(optionsFile)
-        # Check if there are options missing in the optionsFile which do exist in the defaultDict, and add them to the file
-        changed = False
-        for option in Options.defaultDict:
-            if option not in self.options:
-                self[option] = Options.defaultDict[option]
-                changed = True
-        # Check if there are undesired options in the optionsFile which are not in the defaultDict, and remove them from the file
-        unexpectedKeysInFile = [key for key, _ in self.options.items() if key not in Options.defaultDict] # Can not simply iterate over a size-changing dict, so use this key-list instead
-        if len(unexpectedKeysInFile) > 0:
-            changed = True
-            for key in unexpectedKeysInFile:
-                self.options.pop(key)
-        if changed: self.save()
-
-    def reset(self):
-        self.options = Options.defaultDict
-        self.save()
-
-    def __getitem__(self, option):
-         return self.options[option]
-
-    def __setitem__(self, option, value):
-        self.options[option] = value
-        if not Options.similar_dicts(self.options, self.defaultDict): raise ValueError(f"Invalid value for '{option}'.")
-
-    @staticmethod
-    def similar_dicts(d1, d2): # From https://stackoverflow.com/a/24193949
-        ''' Checks if two dictionaries have the same structure (same keys, and same keys with sub-dictionaries). '''
-        if isinstance(d1, dict):
-            if isinstance(d2, dict):
-                return (d1.keys() == d2.keys() and all(Options.similar_dicts(d1[k], d2[k]) for k in d1.keys()))
-            return False # d1 is a dict, but d2 isn't
-        return not isinstance(d2, dict) # if d2 is a dict, then False, else True
-
-
 class App():
-    image_extensions = {'.png', '.jpg', '.jpeg', '.jfif', '.tiff', '.tif', '.bmp', '.webp'}
-    video_extensions = {'.mp4', '.mkv', '.mov', '.wmv', '.avi', '.webm'}
+    """ Press <Escape> once to go into manual mode. Press <Escape> again to resume the automatic slideshow.
+        During manual mode, use the left and right arrow keys to move.
+        During the automatic slideshow, press any key except <Escape> or move/click the mouse to exit.
+        Press <o> at any time to open the file location in explorer (this closes the slideshow).
+    """
+    def __init__(self, settings: Settings = None, directories: List[str] = None, fullscreen: bool = False):
+        self.settings = Settings() if settings is None else settings
+        self.fullscreen = fullscreen
 
-    def __init__(self):
-        self.options = Options()
-        self.fonts = {i: ImageFont.truetype("DejaVuSans.ttf", size=i) for i in range(5, 25)}
-
-        ## 1) Get all the possibly relevant image and video files
-        self.available_paths = [] # Fill this array with all the paths to individual images. Fast with os.walk.
-        for directory in self.options['directories']:
-            if not os.path.exists(directory): continue
-            for dirpath, dirnames, filenames in os.walk(directory, topdown=True):
-                dirnames[:] = [d for d in dirnames if os.path.join(dirpath, d) not in self.options['excluded_directories']] # Don't visit excluded directories at all
-                self.available_paths += [os.path.abspath(os.path.join(dirpath, file)) for file in filenames
-                                    if os.path.splitext(file)[1].lower() in App.image_extensions | App.video_extensions]
-
-        ## 2) Create the fullscreen window
+        ## Create the fullscreen window
         self.root = tk.Tk()
-        self.w_screen, self.h_screen = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        self.root.overrideredirect(1)
-        self.root.geometry("%dx%d+0+0" % (self.w_screen, self.h_screen))
-        self.root.focus_set()
-        self.root.config(cursor="none")
-        exit_cmd = lambda e: (self.root.withdraw(), self.root.quit())
-        for action in ["<Escape>", "<Button>", "<Motion>", "<Key>"]: self.root.bind(action, exit_cmd)
-        self.canvas = tk.Canvas(self.root, width=self.w_screen, height=self.h_screen, bg='black', highlightthickness=0)
-        self.canvas.pack()
+        if self.fullscreen:
+            self.w_screen, self.h_screen = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+            self.root.overrideredirect(1)
+            self.root.geometry("%dx%d+0+0" % (self.w_screen, self.h_screen))
+            self.root.config(cursor="none")
+        else:
+            self.w_screen, self.h_screen = self.root.winfo_screenwidth()//3, self.root.winfo_screenheight()//2
+            self.root.geometry("%dx%d" % (self.w_screen, self.h_screen))
+            self.root.config(cursor="crosshair")
+        for action in ["<Escape>", "<Button>", "<Motion>", "<Key>"]: self.root.bind(action, self.userinput_received)
 
+            
+        self.root.bind("<Configure>", self.resize)
+        self.root.focus_set()
+        self.canvas = tk.Canvas(self.root, width=self.w_screen, height=self.h_screen, bg='black', highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+        
+        ## Create ImageReel object
+        if directories is None:
+            directories = self.settings['directories']
+            excluded_directories = self.settings['excluded_directories']
+        else:
+            excluded_directories = [] # If directories was specified explicitly, then don't exclude the subdirectories from the Settings
+        if directories is None: directories = self.settings['directories']
+        self.imagereel = ImageReel(self.w_screen, self.h_screen, directories, 
+                                   excluded_directories=excluded_directories, only_high_res=self.settings['only_high_res'])
+        self.imagesprite = self.canvas.create_image(self.w_screen//2, self.h_screen//2, image=None)
+        
+        self.paused = False
+        self.text_escape = self.canvas.create_text(self.w_screen//2, 0, text="Slideshow paused. Press <Esc> to resume.", fill="white", anchor="n")
+        self.text_loading = self.canvas.create_text(self.w_screen//2, self.h_screen//2, text="Loading...", fill="white", anchor="center")
+        self.canvas_text_display(self.text_escape, False)
+        self.canvas_text_display(self.text_loading, False)
+    
+    def canvas_text_display(self, text_id: int, show: bool):
+        if show:
+            self.canvas.lift(text_id)
+            self.canvas.itemconfigure(text_id, state='normal')
+        else:
+            self.canvas.lower(text_id)
+            self.canvas.itemconfigure(text_id, state='hidden')
+    
     def run(self):
         self.root.after(0, self.mainIteration)
         self.root.mainloop()
+
+    def resize(self, e):
+        if e.width == self.w_screen and e.height == self.h_screen:
+            return # No resize, just a generic "<Configure>" change
+        self.w_screen, self.h_screen = self.root.winfo_width(), self.root.winfo_height()
+        self.canvas.coords(self.text_escape, self.w_screen//2, 0)
+        self.canvas.coords(self.text_loading, self.w_screen//2, self.h_screen//2)
+        self.canvas.coords(self.imagesprite, self.w_screen//2, self.h_screen//2)
+        self.imagereel.resize(self.w_screen, self.h_screen)
+        self.show_image()
+
+    def toggle_pause(self):
+        self.paused = not self.paused
+        if self.paused:
+            if self.fullscreen: self.root.config(cursor="crosshair")
+            self.canvas_text_display(self.text_escape, True)
+            self.root.after_cancel(self._nextImageLoop)
+        else:
+            if self.fullscreen: self.root.config(cursor="none")
+            self.canvas_text_display(self.text_escape, False)
+            self._nextImageLoop = self.root.after(int(self.settings['interval_seconds']*1000), self.mainIteration)
+        self.root.update()
+    
+    def userinput_received(self, e: tk.Event):
+        if e.type == tk.EventType.Key: # Do these things regardless whether the slideshow was 'paused'
+            if e.keysym == 'Escape':
+                return self.toggle_pause()
+            if e.keysym == 'o': # TODO: does not work when this is run as a real screensaver, because screensaver hides all created windows upon screensaver exit
+                try:
+                    FILEBROWSER_PATH = os.path.join(os.getenv('WINDIR'), 'explorer.exe')
+                    path = os.path.normpath(self.imagereel.current_filepath)
+                    subprocess.Popen([FILEBROWSER_PATH, '/select,', path], creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+                except:
+                    pass
+                self.exit()
+
+        if not self.paused and self.fullscreen:
+            self.exit()
+        
+        if e.type == tk.EventType.Key: # Only do this if 'paused'
+            if e.keysym in ['Left', 'Right']:
+                self.canvas_text_display(self.text_loading, True)
+                self.root.update()
+                if e.keysym == 'Left':
+                    self.imagereel.previous()
+                elif e.keysym == 'Right':
+                    self.imagereel.next()
+                self.show_image()
+                self.canvas_text_display(self.text_loading, False)
+                self.canvas_text_display(self.text_escape, True)
+                self.root.update()
+    
+    def exit(self):
+        return (self.root.withdraw(), self.root.quit())
+
     
     def mainIteration(self, repeat=True):
         t = time.time()
-        im, filepath = self.get_random_image()
-        im = self.annotate_image(im, filepath)
-        self.root.image = ImageTk.PhotoImage(im) # Assign to self.root to prevent garbage collection
-        self.root.imagesprite = self.canvas.create_image(self.w_screen//2, self.h_screen//2, image=self.root.image)
-        wait_ms = int(1000*max(.5, self.options['interval_seconds'] - (time.time() - t)))
-        if repeat: self.root.after(wait_ms, self.mainIteration)
+        self.imagereel.next()
+        self.show_image()
+        wait_ms = int(1000*max(.5, self.settings['interval_seconds'] - (time.time() - t)))
+        if repeat: self._nextImageLoop = self.root.after(wait_ms, self.mainIteration)
+    
+    def show_image(self):
+        self.root.image = ImageTk.PhotoImage(self.imagereel.im) # Assign to self.root to prevent garbage collection
+        self.canvas.itemconfig(self.imagesprite, image=self.root.image)
 
 
-    def get_random_image(self):
-        random_index = random.randint(0,len(self.available_paths)-1)
-        filepath = self.available_paths[random_index]
-        is_image = os.path.splitext(filepath)[1] in App.image_extensions
+class ImageReel:
+    image_extensions = {'.png', '.jpg', '.jpeg', '.jfif', '.tiff', '.tif', '.bmp', '.webp'}
+    video_extensions = {'.mp4', '.mkv', '.mov', '.wmv', '.avi', '.webm'}
+
+    def __init__(self, w: int, h: int, directories: List[str], excluded_directories: List[str] = None, only_high_res: bool = True):
+        self.w, self.h = w, h
+        self._deque = deque(maxlen=128)
+        self._index = 0
+        self.im = Image.new(mode="RGB", size=(1, 1))
+
+        self.ONLY_HIGH_RES = only_high_res
+        self._fonts = {i: ImageFont.truetype("DejaVuSans.ttf", size=i) for i in range(1, 25)}
+
+        ## Construct self.available_paths (list of all allowed files, given <directories> and <excluded_directories>)
+        self.directories = [os.path.abspath(directory) for directory in directories]
+        self.excluded_directories = [os.path.abspath(directory) for directory in excluded_directories]
+        self.available_paths = [] # Fill this array with all the paths to individual images. Fast with os.walk.
+        for directory in self.directories:
+            if not os.path.exists(directory): continue
+            for dirpath, dirnames, filenames in os.walk(directory, topdown=True):
+                dirnames[:] = [d for d in dirnames if os.path.join(dirpath, d) not in self.excluded_directories] # Don't visit excluded directories at all
+                self.available_paths += [os.path.abspath(os.path.join(dirpath, file)) for file in filenames
+                                    if os.path.splitext(file)[1].lower() in ImageReel.image_extensions | ImageReel.video_extensions]
+    
+    def resize(self, w, h):
+        self.w, self.h = w, h
+        filepath, frameNumber = self._deque[self._index]
+        self.im = self._open_image(filepath, frameNumber)
+
+    def next(self):
+        self._to_index(self._index - 1)
+
+    def previous(self):
+        self._to_index(self._index + 1)
+
+    def _to_index(self, n: int):
+        if n < 0:
+            self.im, filepath, frameNumber = self._select_random()
+            self._deque.appendleft((filepath, frameNumber))
+        elif n >= len(self._deque):
+            self.im, filepath, frameNumber = self._select_random()
+            self._deque.append((filepath, frameNumber))
+        else:
+            filepath, frameNumber = self._deque[n]
+            self.im = self._open_image(filepath, frameNumber)
+        self._index = int(np.clip(n, 0, len(self._deque) - 1))
+    
+    @property
+    def current_filepath(self):
+        return self._deque[self._index][0]
+    @property
+    def current_frameNumber(self):
+        return self._deque[self._index][1]
+
+    def _select_random(self):
+        random_index = random.randint(0, len(self.available_paths) - 1)
+        filepath, frameNumber = self.available_paths[random_index], 0
+        ext: str = os.path.splitext(filepath)[1]
+        if ext.lower() in ImageReel.image_extensions:
+            pass
+        elif ext.lower() in ImageReel.video_extensions:
+            cap = cv2.VideoCapture(filepath)
+            num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            frameNumber = random.randint(0, num_frames)
+        else:
+            self._select_random()
+
+        # Check if this fulfills the requirements, otherwise select another random image
+        im = self._open_image(filepath, frameNumber=frameNumber)
+        if im is None:
+            self.available_paths.pop(random_index)
+            return self._select_random()
+
+        w, h = im.size
+        if self.ONLY_HIGH_RES and (w < self.w/2 and h < self.h/2): # Then too small for the screen
+            self.available_paths.pop(random_index)
+            return self._select_random() # Just try another
+        return im, filepath, frameNumber
+
+    def _open_image(self, filepath: str, frameNumber: int = None, raise_err: bool = False):
+        """ Returns None if the image could not be opened for some reason. """
+        is_image = os.path.splitext(filepath)[1].lower() in ImageReel.image_extensions
         if is_image:
             try:
                 im = Image.open(filepath)
-            except (UnidentifiedImageError, Image.DecompressionBombError): # DecompressionBombError if image more than 179 MegaPixels
-                self.available_paths.pop(random_index)
-                return self.get_random_image()
+                im = ImageOps.exif_transpose(im) # To get correct rotation (sometimes rotation info is hidden in EXIF)
+            except (UnidentifiedImageError, Image.DecompressionBombError) as e: # DecompressionBombError if image more than 179 MegaPixels
+                if raise_err: raise e
+                return None
         else:
             cap = cv2.VideoCapture(filepath)
-            randomFrameNumber = random.randint(0, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
-            cap.set(cv2.CAP_PROP_POS_FRAMES, randomFrameNumber) # set frame position
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frameNumber) # set frame position
             success, image = cap.read()
             if not success:
-                self.available_paths.pop(random_index)
-                return self.get_random_image()
+                if raise_err: raise UnidentifiedImageError(f"Could not read frame {frameNumber} of video '{filepath}'.")
+                return None
             im = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)) # Videos are in BGR, so convert to RGB
+        
+        ## Resize and annotate
         w, h = im.size
-        if self.options['only_high_res'] and (w < self.w_screen/2 and h < self.h_screen/2): # Then too small for the screen
-            self.available_paths.pop(random_index)
-            return self.get_random_image() # Just try another
-        ratio = min(self.w_screen/w, self.h_screen/h)
+        ratio = min(self.w/w, self.h/h)
         im = im.resize((int(w*ratio), int(h*ratio)), Image.LANCZOS)
-        return im, filepath
+        im = self._annotate_image(im, filepath)
+        return im
 
-    def annotate_image(self, im: Image.Image, filepath: str, pad=10, interline=7):
+    def _annotate_image(self, im: Image.Image, filepath: str, pad=10, interline=7):
+        """ This is an extremely filthy function internally, but it does the job. :) """
         w, h = im.size
-        full_im = Image.new('RGBA', (self.w_screen, self.h_screen), (0, 0, 0, 255))
-        full_im.paste(im, (int((self.w_screen - w)/2), int((self.h_screen - h)/2)))
+        full_im = Image.new('RGBA', (self.w, self.h), (0, 0, 0, 255))
+        full_im.paste(im, (int((self.w - w)/2), int((self.h - h)/2)))
 
         ## Determine text size
-        for directory in self.options['directories']:
+        for directory in self.directories:
             if directory in filepath:
                 filepath = filepath.replace(directory, '')[1:]
                 break
         path_parts = os.path.splitext(filepath)[0].split('\\')
         path_parts[:-1] = [u"▶ " + part for part in path_parts[:-1]]
+        path_parts.insert(0, directory)
 
-        max_length_px, max_font_size = self.w_screen/3, 24
-        lengths_20 = [self.fonts[20].getbbox(part)[2] for part in path_parts]
+        max_length_px, max_font_size = self.w/3, 24
+        lengths_20 = [self._fonts[20].getbbox(part)[2] for part in path_parts]
         fontsizes = [min(max_font_size, int(max_length_px/length*20)) for length in lengths_20]
-        fontsizes[:-1] = [min(fontsizes[:-1]) for _ in fontsizes[:-1]] # Set all but the last directory to same font size
+        fontsizes[:-1] = [min(fontsizes[1:-1]) for _ in fontsizes[:-1]] # Set all but the last directory to same font size
+        fontsizes[0] = 8
 
         ## Calculate size of text and surrounding box
-        text_im = Image.new('RGBA', (self.w_screen, self.h_screen), color=(255, 255, 255, 0))
+        text_im = Image.new('RGBA', (self.w, self.h), color=(255, 255, 255, 0))
         h_line_max, w_max = 0, 0
         for i, part in enumerate(path_parts):
-            bbox = self.fonts[fontsizes[i]].getbbox(part)
+            bbox = self._fonts[fontsizes[i]].getbbox(part)
             h_line_max = max(h_line_max, bbox[3]-bbox[1])
             w_max = max(w_max, bbox[2])
-        w_rect, h_rect = w_max + interline + 3*pad, (h_line_max + interline)*len(path_parts) + 2*pad
+        w_rect, h_rect = w_max + interline + 3*pad, (h_line_max + interline)*(len(path_parts) - 1) + 2*pad + fontsizes[0] + interline
 
         ## Calculate which corner to put the textbox in
-        if w/h < self.w_screen/self.h_screen:
-            dh, dw = h_rect, (w - self.w_screen)/2 + w_rect
+        if w/h < self.w/self.h:
+            dh, dw = h_rect, (w - self.w)/2 + w_rect
         else:
-            dw, dh = w_rect, (h - self.h_screen)/2 + h_rect
-        corner = self.least_cluttered_corner(im, dw, dh)
+            dw, dh = w_rect, (h - self.h)/2 + h_rect
+        corner = ImageReel.least_cluttered_corner(im, dw, dh)
         anchor = ['lt', 'rt', 'rb', 'lb'][corner]
         east, south = anchor[0] == 'r', anchor[1] == 'b'
-        if east: path_parts[:-1] = [part[2:] + u" ◀" for part in path_parts[:-1]]
+        if east: path_parts[1:-1] = [part[2:] + u" ◀" for part in path_parts[1:-1]]
         
         ## Draw the text and box
         drw = ImageDraw.Draw(text_im, 'RGBA')
         box_vertices = [(-10, -10), (w_rect, -10), (w_rect, h_rect-20), (w_rect-20, h_rect), (-10, h_rect)]
-        transformed_pixels = lambda list_of_tuples: [(self.w_screen - x if east else x, self.h_screen - y if south else y) for x, y in list_of_tuples]
-        drw.polygon(xy=transformed_pixels(box_vertices), fill=(180, 150, 75, 192), outline=(64, 50, 25, 255), width=3)
+        transformed_pixels = lambda list_of_tuples: [(self.w - x if east else x, self.h - y if south else y) for x, y in list_of_tuples]
+        drw.polygon(xy=transformed_pixels(box_vertices), fill=(120, 100, 50, 220), outline=(64, 50, 25, 255), width=3)
         drw.line(xy=transformed_pixels([(w_rect-1, h_rect-27), (w_rect-27, h_rect-1)]), fill=(64, 50, 25, 255), width=2) # Small extra line for fanciness
+        text_y = 3
         for i, part in enumerate(path_parts):
-            color = "#AAAAAA" if (i + 1) < len(path_parts) else "#FFFFFF"
-            text_x = pad
-            text_y = h_line_max*i + pad + i*interline
+            color = "#997744" if i == 0 else ("#C4C4C4" if (i + 1) < len(path_parts) else "#FFFFFF")
+            text_x = pad if i != 0 else 3
+            if i != 0: text_y += (h_line_max if i != 1 else fontsizes[0]) + interline
             if i + 1 == len(path_parts): text_y += interline # Move the filename further away because this looks better
-            drw.text((self.w_screen - text_x if east else text_x, self.h_screen - text_y if south else text_y), text=part, font=self.fonts[fontsizes[i]], fill=color, anchor=anchor)
+            drw.text((self.w - text_x if east else text_x, self.h - text_y if south else text_y), text=part,
+                     font=self._fonts[fontsizes[i]], fill=color, anchor=anchor)
+
         full_im.paste(text_im, (0, 0), text_im) # Repeat text_im in the 3rd argument to have correct transparency
         return full_im
-    
-    def least_cluttered_corner(self, im: Image.Image, dw: int, dh: int):
+
+    @staticmethod
+    def least_cluttered_corner(im: Image.Image, dw: int, dh: int):
         if dw <= 0 or dh <= 0: return 3 # Default bottom left corner
         w, h = im.size
         im = im.convert('L')
         corners_cluttering = [0]*4
-        for i, corner_coords in enumerate([(0,0,dw,dh), (w-dw,0,w,dh), (w-dw,h-dh,w,h), (0,h-dh,dw,h)]): # nw, ne, se, sw
+        for i, corner_coords in enumerate([(0, 0, dw, dh), (w - dw, 0, w, dh), (w - dw, h - dh, w, h), (0, h - dh, dw, h)]): # nw, ne, se, sw
             corner = np.array(im.crop(corner_coords)).astype(float)
-            corners_cluttering[i] = np.average(np.absolute(ndi.filters.laplace(corner / 255.0)))
+            corners_cluttering[i] = np.average(np.absolute(ndi.laplace(corner/255.0))) # If error: use ndi.filters.laplace
         return np.argmin(corners_cluttering)
 
 
 if __name__ == "__main__":
-    app = App()
-    app.run()
+    ## Parse command-line arguments
+    # Note: if the extension is changed to ".scr", then it is no longer possible to drag-and-drop a folder onto that file (contrary to a .exe).
+    cmd_argument = None
+    directory = None
+    for item in sys.argv[1:]:
+        if item.lower().startswith("/"): # Then it is command-line argument
+            cmd_argument = item.lower()[:2] # Only first two characters (/p, /c, /s) because Windows adds extra info after that (e.g. sys.argv[1]=="/s:13658452")
+        else:
+            directory = [item]
+    
+    ## Follow API from https://learn.microsoft.com/sl-si/previous-versions/troubleshoot/windows/win32/screen-saver-command-line
+    if cmd_argument == "/p": # Preview Screen Saver as child of window <HWND>.
+        exit() # Ignore /p, don't know how to show in HWND so just stop the program
+    elif cmd_argument == "/c": # Show the Settings dialog box, modal to the foreground window.
+        app = SettingsWindow()
+        app.run()
+    elif cmd_argument == "/s": # Run the Screen Saver in fullscreen mode.
+        app = App(directories=directory, fullscreen=True)
+        app.run()
+    else: # Run the Screen Saver in windowed mode.
+        app = App(directories=directory, fullscreen=False)
+        app.run()
