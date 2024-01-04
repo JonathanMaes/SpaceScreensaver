@@ -1,22 +1,13 @@
 import json
 import os
-import platformdirs
 import subprocess
 import tkinter as tk
 import tkinter.ttk as ttk
 
-from pathlib import Path
 from tkinter import filedialog, messagebox
 from tkinter.font import Font
 
-
-def appdir(dir_func, **kwargs):
-    """ <dir_func> should be one of the top-level functions of the <platformdirs> package (e.g. <platformdirs.user_cache_dir>). """
-    dirpath = Path(dir_func("SpaceScreensaver", "Jonathan's Programma's", **kwargs))
-    if not dirpath.exists(): dirpath.mkdir(parents=True)
-    return dirpath
-
-cachedir = appdir(platformdirs.user_cache_dir) # For larger files (like the TLE cache)
+import utils
 
 
 class Settings():
@@ -28,7 +19,7 @@ class Settings():
     }
 
     def __init__(self, file='settings.json'):
-        directory = appdir(platformdirs.user_config_dir)
+        directory = utils.configdir
         self.file = os.path.join(directory, file)
         os.makedirs(directory, exist_ok=True)
         if not os.path.exists(self.file): self.reset()
@@ -107,11 +98,12 @@ class SettingsWindow():
 
         ## Create the fullscreen window
         self.root = tk.Tk()
-        self.root.title("Jonathan's Screensaver - Settings")
+        self.root.title(f"{utils.PROGRAMNAME_READABLE} - Settings")
         self.w_screen, self.h_screen = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         self.root.geometry(f"800x250+{max(0, (self.w_screen-800)//2)}+{max(0, (self.h_screen-250)//2 - 100)}") # Nice in the center, almost.
         self.root.focus_set()
         self.root.protocol("WM_DELETE_WINDOW", self.exit) # Pressing the red 'X' goes to self.exit
+        self.root.report_callback_exception = utils.show_error
 
         # Make widgets sized to window
         self.root.grid_columnconfigure((0, 4), pad=10, weight=2, uniform="dircols")

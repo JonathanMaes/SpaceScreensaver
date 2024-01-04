@@ -17,8 +17,10 @@ import warnings
 from ctypes import windll
 from collections import deque
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageTk, UnidentifiedImageError
-from settings import Settings, SettingsWindow
 from typing import List
+
+from settings import Settings, SettingsWindow
+import utils
 
 warnings.simplefilter('ignore', Image.DecompressionBombWarning) # Ignore warning (i.e. dont warn for images between 90 and 179 MP)
 windll.shcore.SetProcessDpiAwareness(1)
@@ -36,6 +38,7 @@ class App():
 
         ## Create the fullscreen window
         self.root = tk.Tk()
+        self.root.report_callback_exception = utils.show_error
         if self.fullscreen:
             self.w_screen, self.h_screen = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
             self.root.overrideredirect(1)
@@ -47,8 +50,8 @@ class App():
             self.root.config(cursor="crosshair")
         for action in ["<Escape>", "<Button>", "<Motion>", "<Key>"]: self.root.bind(action, self.userinput_received)
 
-            
         self.root.bind("<Configure>", self.resize)
+        self.last_resize_time = 0
         self.root.focus_set()
         self.canvas = tk.Canvas(self.root, width=self.w_screen, height=self.h_screen, bg='black', highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
@@ -67,9 +70,11 @@ class App():
         self.paused = False
         self.text_escape = self.canvas.create_text(self.w_screen//2, 0, text="Slideshow paused. Press <Esc> to resume.", fill="white", anchor="n")
         self.text_loading = self.canvas.create_text(self.w_screen//2, self.h_screen//2, text="Loading...", fill="white", anchor="center")
+        self.text_resizing = self.canvas.create_text(0, 0, text="Resizing image...", fill="white", anchor="nw")
         self.canvas_text_display(self.text_escape, False)
         self.canvas_text_display(self.text_loading, False)
-    
+        self.canvas_text_display(self.text_resizing, False)
+
     def canvas_text_display(self, text_id: int, show: bool):
         if show:
             self.canvas.lift(text_id)
@@ -82,9 +87,27 @@ class App():
         self.root.after(0, self.mainIteration)
         self.root.mainloop()
 
-    def resize(self, e):
+    def resize(self, e, manual=True):
+        """ If <manual> is True (default), it means that the resizing is done by the user.
+            If it is False, it was scheduled and should actually redraw
+            (if the user is not dragging the window edges anymore).
+        """
         if e.width == self.w_screen and e.height == self.h_screen:
             return # No resize, just a generic "<Configure>" change
+        
+        # Waiting logic to prevent excessive recalculation of image
+        wait_time = 200 # [ms]
+        if manual:
+            self.canvas_text_display(self.text_resizing, True)
+            self.last_resize_time = time.time()
+            self.root.after(wait_time, lambda: self.resize(e, manual=False))
+            return # Let's wait a bit to see if the user is still actively dragging the window edges
+        if time.time() - self.last_resize_time < wait_time/1000/1.5: # Divide by 1.5 to be sure
+            return
+        self.last_resize_time = time.time()
+
+        # We waited long enough apparently, so recalculate the image
+        self.canvas_text_display(self.text_resizing, False)
         self.w_screen, self.h_screen = self.root.winfo_width(), self.root.winfo_height()
         self.canvas.coords(self.text_escape, self.w_screen//2, 0)
         self.canvas.coords(self.text_loading, self.w_screen//2, self.h_screen//2)
@@ -325,25 +348,31 @@ class ImageReel:
 
 
 if __name__ == "__main__":
-    ## Parse command-line arguments
-    # Note: if the extension is changed to ".scr", then it is no longer possible to drag-and-drop a folder onto that file (contrary to a .exe).
-    cmd_argument = None
-    directory = None
-    for item in sys.argv[1:]:
-        if item.lower().startswith("/"): # Then it is command-line argument
-            cmd_argument = item.lower()[:2] # Only first two characters (/p, /c, /s) because Windows adds extra info after that (e.g. sys.argv[1]=="/s:13658452")
-        else:
-            directory = [item]
-    
-    ## Follow API from https://learn.microsoft.com/sl-si/previous-versions/troubleshoot/windows/win32/screen-saver-command-line
-    if cmd_argument == "/p": # Preview Screen Saver as child of window <HWND>.
-        exit() # Ignore /p, don't know how to show in HWND so just stop the program
-    elif cmd_argument == "/c": # Show the Settings dialog box, modal to the foreground window.
-        app = SettingsWindow()
-        app.run()
-    elif cmd_argument == "/s": # Run the Screen Saver in fullscreen mode.
-        app = App(directories=directory, fullscreen=True)
-        app.run()
-    else: # Run the Screen Saver in windowed mode.
-        app = App(directories=directory, fullscreen=False)
-        app.run()
+    try:
+        os.chdir(os.path.dirname(os.path.abspath(__file__))) # Set current working directory
+
+        ## Parse command-line arguments
+        # Note: if the extension is changed to ".scr", then it is no longer possible to drag-and-drop a folder onto that file (contrary to a .exe).
+        cmd_argument = None
+        directory = None
+        for item in sys.argv[1:]:
+            if item.lower().startswith("/"): # Then it is command-line argument
+                cmd_argument = item.lower()[:2] # Only first two characters (/p, /c, /s) because Windows adds extra info after that (e.g. sys.argv[1]=="/s:13658452")
+            else:
+                directory = [item]
+        
+        ## Follow API from https://learn.microsoft.com/sl-si/previous-versions/troubleshoot/windows/win32/screen-saver-command-line
+        if cmd_argument == "/p": # Preview Screen Saver as child of window <HWND>.
+            exit() # Ignore /p, don't know how to show in HWND so just stop the program
+        elif cmd_argument == "/c": # Show the Settings dialog box, modal to the foreground window.
+            app = SettingsWindow()
+            app.run()
+        elif cmd_argument == "/s": # Run the Screen Saver in fullscreen mode.
+            app = App(directories=directory, fullscreen=True)
+            app.run()
+        else: # Run the Screen Saver in windowed mode.
+            app = App(directories=directory, fullscreen=False)
+            app.run()
+    except Exception:
+        utils.show_error()
+
