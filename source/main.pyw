@@ -295,8 +295,9 @@ class ImageReel:
         max_length_px, max_font_size = self.w/3, 24
         lengths_20 = [self._fonts[20].getbbox(part)[2] for part in path_parts]
         fontsizes = [min(max_font_size, int(max_length_px/length*20)) for length in lengths_20]
-        fontsizes[:-1] = [min(fontsizes[1:-1]) for _ in fontsizes[:-1]] # Set all but the last directory to same font size
-        fontsizes[0] = 8
+        if len(fontsizes) >= 3:
+            fontsizes[1:-1] = [min(fontsizes[1:-1]) for _ in fontsizes[1:-1]] # Set all but the last directory to same font size
+        fontsizes[0] = 8 # The base directory in very small text
 
         ## Calculate size of text and surrounding box
         text_im = Image.new('RGBA', (self.w, self.h), color=(255, 255, 255, 0))
@@ -363,7 +364,7 @@ if __name__ == "__main__":
         
         ## Follow API from https://learn.microsoft.com/sl-si/previous-versions/troubleshoot/windows/win32/screen-saver-command-line
         if cmd_argument == "/p": # Preview Screen Saver as child of window <HWND>.
-            exit() # Ignore /p, don't know how to show in HWND so just stop the program
+            sys.exit() # Ignore /p, don't know how to show in HWND so just stop the program
         elif cmd_argument == "/c": # Show the Settings dialog box, modal to the foreground window.
             app = SettingsWindow()
             app.run()
