@@ -17,6 +17,7 @@ import warnings
 from ctypes import windll
 from collections import deque
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageTk, UnidentifiedImageError
+from tkinter import messagebox
 from typing import List
 
 from settings import Settings, SettingsWindow
@@ -63,8 +64,14 @@ class App():
         else:
             excluded_directories = [] # If directories was specified explicitly, then don't exclude the subdirectories from the Settings
         if directories is None: directories = self.settings['directories']
-        self.imagereel = ImageReel(self.w_screen, self.h_screen, directories, 
-                                   excluded_directories=excluded_directories, only_high_res=self.settings['only_high_res'])
+        try:
+            self.imagereel = ImageReel(self.w_screen, self.h_screen, directories, 
+                                    excluded_directories=excluded_directories, only_high_res=self.settings['only_high_res'])
+        except FileNotFoundError:
+            self.exit()
+            messagebox.showerror(f"Error in {utils.PROGRAMNAME_READABLE}", "The folders searched by the screensaver\ndo not contain suitable images or videos.\nCheck the settings.")
+            SettingsWindow().run()
+            raise SilentError()
         self.imagesprite = self.canvas.create_image(self.w_screen//2, self.h_screen//2, image=None)
         
         self.paused = False
@@ -195,6 +202,7 @@ class ImageReel:
                 dirnames[:] = [d for d in dirnames if os.path.join(dirpath, d) not in self.excluded_directories] # Don't visit excluded directories at all
                 self.available_paths += [os.path.abspath(os.path.join(dirpath, file)) for file in filenames
                                     if os.path.splitext(file)[1].lower() in ImageReel.image_extensions | ImageReel.video_extensions]
+        if len(self.available_paths) == 0: raise FileNotFoundError("No images or videos found in the available directories.")
     
     def resize(self, w, h):
         self.w, self.h = w, h
@@ -347,6 +355,7 @@ class ImageReel:
             corners_cluttering[i] = np.average(np.absolute(ndi.laplace(corner/255.0))) # If error: use ndi.filters.laplace
         return np.argmin(corners_cluttering)
 
+class SilentError(Exception): pass
 
 if __name__ == "__main__":
     try:
@@ -374,6 +383,8 @@ if __name__ == "__main__":
         else: # Run the Screen Saver in windowed mode.
             app = App(directories=directory, fullscreen=False)
             app.run()
+    except SilentError:
+        pass
     except Exception:
         utils.show_error()
 
