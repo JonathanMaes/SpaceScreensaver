@@ -3,6 +3,7 @@ import os
 import subprocess
 import tkinter as tk
 import tkinter.ttk as ttk
+import tkfilebrowser
 
 from tkinter import filedialog, messagebox
 from tkinter.font import Font
@@ -116,7 +117,7 @@ class SettingsWindow():
         dir_frame.grid_rowconfigure(1, weight=1)
 
         dir_label = tk.Label(dir_frame, text="Directories", font=Font(size=14, underline=True), background='#222', foreground='white')
-        self.dir_list = tk.Listbox(dir_frame, selectmode=tk.SINGLE, background='#222', foreground='white', borderwidth=0, highlightthickness=0) # TODO: allow choosing multiple folders at once
+        self.dir_list = tk.Listbox(dir_frame, selectmode=tk.EXTENDED, background='#222', foreground='white', borderwidth=0, highlightthickness=0) # TODO: allow choosing multiple folders at once
         add_dir_button = HoverButton(dir_frame, text="Add", command=self.add_directory, background="#AAF", activebackground="#CCF")
         remove_dir_button = HoverButton(dir_frame, text="Remove", command=self.remove_directory, background="#F44", activebackground="#F77")
 
@@ -132,7 +133,7 @@ class SettingsWindow():
         excluded_frame.grid_rowconfigure(1, weight=1)
 
         excluded_label = tk.Label(excluded_frame, text="Excluded directories", font=Font(size=14, underline=True), background='#222', foreground='white')
-        self.excluded_list = tk.Listbox(excluded_frame, selectmode=tk.SINGLE, background='#222', foreground='white', borderwidth=0, highlightthickness=0)
+        self.excluded_list = tk.Listbox(excluded_frame, selectmode=tk.EXTENDED, background='#222', foreground='white', borderwidth=0, highlightthickness=0)
         add_ex_button = HoverButton(excluded_frame, text="Add exclusion", command=self.add_excluded_directory, background="#AAF", activebackground="#CCF")
         remove_ex_button = HoverButton(excluded_frame, text="Remove exclusion", command=self.remove_excluded_directory, background="#F44", activebackground="#F77")
 
@@ -180,7 +181,7 @@ class SettingsWindow():
     
     def exit(self):
         if not self.is_unchanged():
-            do_quit = messagebox.askokcancel("Quit", "Do you want to discard unsaved changes?")
+            do_quit = messagebox.askokcancel("Quit", "Exit and discard unsaved changes?")
             if not do_quit: return
         (self.root.withdraw(), self.root.quit())
 
@@ -219,28 +220,26 @@ class SettingsWindow():
             self.button_save.config(text="Saved successfully.")
             self.root.after(1000, lambda: self.button_save.config(text="Save settings"))
 
-    # Function to add a directory to the list
     def add_directory(self):
-        directory = filedialog.askdirectory()
-        if directory:
-            self.dir_list.insert(tk.END, directory)
+        selected = self.dir_list.get(tk.ACTIVE)
+        initialdir = os.path.dirname(selected) if selected else None
+        directories = tkfilebrowser.askopendirnames(foldercreation=False, initialdir=initialdir)
+        for directory in directories:
+            self.dir_list.insert(tk.END, directory.replace('\\', '/'))
 
-    # Function to remove a directory from the list
     def remove_directory(self):
-        selection = self.dir_list.curselection()
-        if selection:
-            index = selection[0]
+        selection = sorted(self.dir_list.curselection(), reverse=True) # Sort descending to ensure popping elements does not affect subsequent indices
+        for index in selection:
             self.dir_list.delete(index)
 
-    # Function to add an excluded directory
     def add_excluded_directory(self):
-        directory = filedialog.askdirectory()
-        if directory:
-            self.excluded_list.insert(tk.END, directory)
+        selected = self.excluded_list.get(tk.ACTIVE)
+        initialdir = os.path.dirname(selected) if selected else None
+        directories = tkfilebrowser.askopendirnames(foldercreation=False, initialdir=initialdir)
+        for directory in directories:
+            self.excluded_list.insert(tk.END, directory.replace('\\', '/'))
 
-    # Function to remove an excluded directory
     def remove_excluded_directory(self):
-        selection = self.excluded_list.curselection()
-        if selection:
-            index = selection[0]
+        selection = sorted(self.excluded_list.curselection(), reverse=True)
+        for index in selection:
             self.excluded_list.delete(index)
