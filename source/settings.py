@@ -31,7 +31,8 @@ class Settings():
 
     def load(self):
         with open(self.file, 'r') as optionsFile:
-            self.options: dict = json.load(optionsFile)
+            data = optionsFile.read()
+            self.options: dict = json.loads(data.replace('\\', '\\\\').replace('\\\\\\\\', '\\\\'))
         # Check if there are options missing in the optionsFile which do exist in the defaultDict, and add them to the file
         changed = False
         for option in Settings.defaultDict:
@@ -66,8 +67,6 @@ class Settings():
             return False # d1 is a dict, but d2 isn't
         return not isinstance(d2, dict) # if d2 is a dict, then False, else True
 
-
-# TODO: finish GUI that can easily edit/export Settings
 
 class HoverButton(tk.Button):
     def __init__(self, master, **kw):
@@ -117,7 +116,7 @@ class SettingsWindow():
         dir_frame.grid_rowconfigure(1, weight=1)
 
         dir_label = tk.Label(dir_frame, text="Directories", font=Font(size=14, underline=True), background='#222', foreground='white')
-        self.dir_list = tk.Listbox(dir_frame, selectmode=tk.SINGLE, background='#222', foreground='white', borderwidth=0, highlightthickness=0)
+        self.dir_list = tk.Listbox(dir_frame, selectmode=tk.SINGLE, background='#222', foreground='white', borderwidth=0, highlightthickness=0) # TODO: allow choosing multiple folders at once
         add_dir_button = HoverButton(dir_frame, text="Add", command=self.add_directory, background="#AAF", activebackground="#CCF")
         remove_dir_button = HoverButton(dir_frame, text="Remove", command=self.remove_directory, background="#F44", activebackground="#F77")
 
@@ -153,8 +152,7 @@ class SettingsWindow():
         self.button_open_settings.grid(row=0, column=0, columnspan=2, padx=10, pady=3, sticky="sew")
 
         # Checkbox for 'only_high_res'
-        self.high_res_var = tk.BooleanVar()
-        self.high_res_var.set(True)  # Default value
+        self.high_res_var = tk.BooleanVar(self.root)
         high_res_check = tk.Checkbutton(other_frame, text="Use only high\nresolution photos", variable=self.high_res_var)
         high_res_check.grid(row=2, column=0, columnspan=2, pady=10)
 
@@ -194,17 +192,17 @@ class SettingsWindow():
     # Load the default values into the GUI
     def load_values(self):
         for directory in self.settings["directories"]:
-            self.dir_list.insert(tk.END, directory)
+            self.dir_list.insert(tk.END, os.path.abspath(directory).replace('\\', '/'))
         for directory in self.settings["excluded_directories"]:
-            self.excluded_list.insert(tk.END, directory)
+            self.excluded_list.insert(tk.END, os.path.abspath(directory).replace('\\', '/'))
         self.high_res_var.set(self.settings["only_high_res"])
         self.interval_spinbox.delete(0, tk.END)
         self.interval_spinbox.insert(0, self.settings["interval_seconds"])
 
-    def is_unchanged(self):
+    def is_unchanged(self): # TODO: better way of checking this, now we have redundant code between this and save_json
         unchanged = True
         unchanged &= self.settings["directories"] == list(self.dir_list.get(0, tk.END))
-        unchanged &= self.settings["excluded_directories"] == self.excluded_list.get(0, tk.END)
+        unchanged &= self.settings["excluded_directories"] == list(self.excluded_list.get(0, tk.END))
         unchanged &= self.settings["only_high_res"] == self.high_res_var.get()
         unchanged &= self.settings["interval_seconds"] == int(self.interval_spinbox.get())
         return unchanged
@@ -212,7 +210,7 @@ class SettingsWindow():
     # Function to update the JSON data
     def save_json(self, flash_button: bool = True):
         self.settings["directories"] = list(self.dir_list.get(0, tk.END))
-        self.settings["excluded_directories"] = self.excluded_list.get(0, tk.END)
+        self.settings["excluded_directories"] = list(self.excluded_list.get(0, tk.END))
         self.settings["only_high_res"] = self.high_res_var.get()
         self.settings["interval_seconds"] = int(self.interval_spinbox.get())
         self.settings.save()
