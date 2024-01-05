@@ -135,10 +135,14 @@ class App():
         self.root.update()
     
     def userinput_received(self, e: tk.Event):
-        if e.type == tk.EventType.Key: # Do these things regardless whether the slideshow was 'paused'
+        ## Things to do regardless of whether the slideshow is 'paused'
+        if e.type == tk.EventType.Key:
             if e.keysym == 'Escape':
                 return self.toggle_pause()
-            if e.keysym == 'o': # TODO: does not work when this is run as a real screensaver, because screensaver hides all created windows upon screensaver exit
+            if e.keysym == 'o' and not self.fullscreen: # Do not open an explorer window if this is a real screensaver.
+                # Opening separate windows does not work for screensavers, because they actually run on a separate desktop. (See https://stackoverflow.com/a/4004235)
+                # Thus, the explorer window would open on the "screensaver desktop", but upon self.exit() the normal desktop is displayed again.
+                # There is allegedly no way to communicate between such desktops, so we can not open an explorer window on the normal desktop either.
                 try:
                     FILEBROWSER_PATH = os.path.join(os.getenv('WINDIR'), 'explorer.exe')
                     path = os.path.normpath(self.imagereel.current_filepath)
@@ -147,10 +151,13 @@ class App():
                     pass
                 self.exit()
 
-        if not self.paused and self.fullscreen:
+        ## Exit upon any user input
+        if not self.paused and self.fullscreen: # But only if fullscreen (and not 'paused')
             self.exit()
+            return
         
-        if e.type == tk.EventType.Key: # Only do this if 'paused'
+        ## Things to do if slideshow is 'paused' (or not fullscreen)
+        if e.type == tk.EventType.Key:
             if e.keysym in ['Left', 'Right']:
                 self.canvas_text_display(self.text_loading, True)
                 self.root.update()
