@@ -13,7 +13,7 @@ def appdir(dir_func, **kwargs):
     if not dirpath.exists(): dirpath.mkdir(parents=True)
     return dirpath
 
-configdir = appdir(platformdirs.user_cache_dir) # For larger files (like the TLE cache)
+configdir = appdir(platformdirs.user_config_dir) # For larger files (like the TLE cache)
 
 
 def show_error(*args):

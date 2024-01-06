@@ -5,4 +5,5 @@ ordered-set==4.1.0
 pillow==10.2.0
 platformdirs==4.1.0
 scipy==1.11.4
+tkfilebrowser==2.3.2
 zstandard==0.22.0

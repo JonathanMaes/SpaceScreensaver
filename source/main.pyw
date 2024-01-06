@@ -58,12 +58,12 @@ class App():
         self.canvas.pack(fill="both", expand=True)
         
         ## Create ImageReel object
-        if directories is None:
+        if not directories:
             directories = self.settings['directories']
             excluded_directories = self.settings['excluded_directories']
         else:
             excluded_directories = [] # If directories was specified explicitly, then don't exclude the subdirectories from the Settings
-        if directories is None: directories = self.settings['directories']
+
         try:
             self.imagereel = ImageReel(self.w_screen, self.h_screen, directories, 
                                     excluded_directories=excluded_directories, only_high_res=self.settings['only_high_res'])
@@ -71,7 +71,7 @@ class App():
             self.exit()
             messagebox.showerror(f"Error in {utils.PROGRAMNAME_READABLE}", "The folders searched by the screensaver\ndo not contain suitable images or videos.\nCheck the settings.")
             SettingsWindow().run()
-            raise SilentError()
+            raise AppError()
         self.imagesprite = self.canvas.create_image(self.w_screen//2, self.h_screen//2, image=None)
         
         self.paused = False
@@ -362,7 +362,7 @@ class ImageReel:
             corners_cluttering[i] = np.average(np.absolute(ndi.laplace(corner/255.0))) # If error: use ndi.filters.laplace
         return np.argmin(corners_cluttering)
 
-class SilentError(Exception): pass
+class AppError(Exception): pass
 
 if __name__ == "__main__":
     try:
@@ -370,27 +370,36 @@ if __name__ == "__main__":
 
         ## Parse command-line arguments
         # Note: if the extension is changed to ".scr", then it is no longer possible to drag-and-drop a folder onto that file (contrary to a .exe).
-        cmd_argument = None
-        directory = None
+        cmd_argument, HWND, directories = None, None, []
         for item in sys.argv[1:]:
             if item.lower().startswith("/"): # Then it is command-line argument
                 cmd_argument = item.lower()[:2] # Only first two characters (/p, /c, /s) because Windows adds extra info after that (e.g. sys.argv[1]=="/s:13658452")
+            elif item.isnumeric():
+                HWND = int(item)
             else:
-                directory = [item]
+                directories.append(item)
         
-        ## Follow API from https://learn.microsoft.com/sl-si/previous-versions/troubleshoot/windows/win32/screen-saver-command-line
+        ## Follow documentation from https://learn.microsoft.com/en-us/previous-versions/troubleshoot/windows/win32/screen-saver-command-line
         if cmd_argument == "/p": # Preview Screen Saver as child of window <HWND>.
-            sys.exit() # Ignore /p, don't know how to show in HWND so just stop the program
+            sys.exit() # Ignore /p for now, I don't know how to make tkinter window a child of HWND
+            # app = App(directories=directories, fullscreen=False)
+            # HWND_app = int(app.root.winfo_id())
+            # if HWND is not None: # The following was adapted from https://sites.harding.edu/fmccown/screensaver/screensaver.html
+            #     import win32gui
+            #     win32gui.SetParent(HWND_app, HWND) # Set the preview window as the parent of this window
+            #     win32gui.SetWindowLong(HWND_app, -16, win32gui.GetWindowLong(HWND_app, -16) | 0x40000000) # Make this a child window so it will close when the parent dialog closes (GWL_STYLE = -16, WS_CHILD = 0x40000000)
+            #     ParentRect = win32gui.GetClientRect(HWND) # Place our window inside the parent. Not sure how to do this. We need to get the Rect, but what to do with it?
+            # app.run()
         elif cmd_argument == "/c": # Show the Settings dialog box, modal to the foreground window.
             app = SettingsWindow()
             app.run()
-        elif cmd_argument == "/s": # Run the Screen Saver in fullscreen mode.
-            app = App(directories=directory, fullscreen=True)
+        elif cmd_argument == "/s": # Run the Screen Saver.
+            app = App(directories=directories, fullscreen=True)
             app.run()
-        else: # Run the Screen Saver in windowed mode.
-            app = App(directories=directory, fullscreen=False)
+        else: # Show the Settings dialog box.
+            app = SettingsWindow()
             app.run()
-    except SilentError:
+    except AppError:
         pass
     except Exception:
         utils.show_error()
