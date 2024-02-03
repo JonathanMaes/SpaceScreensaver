@@ -49,12 +49,12 @@ class App():
             self.w_screen, self.h_screen = self.root.winfo_screenwidth()//3, self.root.winfo_screenheight()//2
             self.root.geometry("%dx%d" % (self.w_screen, self.h_screen))
             self.root.config(cursor="crosshair")
-        for action in ["<Escape>", "<Button>", "<Motion>", "<Key>"]: self.root.bind(action, self.userinput_received)
+        for action in ["<Escape>", "<Button>", "<Motion>", "<Key>", "<MouseWheel>"]: self.root.bind(action, self.userinput_received)
 
         self.root.bind("<Configure>", self.resize)
         self.last_resize_time = 0
         self.root.focus_set()
-        self.canvas = tk.Canvas(self.root, width=self.w_screen, height=self.h_screen, bg='black', highlightthickness=0)
+        self.canvas = tk.Canvas(self.root, width=self.w_screen, height=self.h_screen, bg='black', highlightthickness=0) # TODO: implement zooming like https://stackoverflow.com/a/48137257/
         self.canvas.pack(fill="both", expand=True)
         
         ## Create ImageReel object
@@ -182,6 +182,7 @@ class App():
         if repeat: self._nextImageLoop = self.root.after(wait_ms, self.mainIteration)
     
     def show_image(self):
+        if self.imagereel.im is None: self.exit()
         self.root.image = ImageTk.PhotoImage(self.imagereel.im) # Assign to self.root to prevent garbage collection
         self.canvas.itemconfig(self.imagesprite, image=self.root.image)
 
@@ -191,6 +192,7 @@ class ImageReel:
     video_extensions = {'.mp4', '.mkv', '.mov', '.wmv', '.avi', '.webm'}
 
     def __init__(self, w: int, h: int, directories: List[str], excluded_directories: List[str] = None, only_high_res: bool = True):
+        # TODO: make the available_paths stored somewhere in a cache directory, and recalculate it in a separate thread than all the display/input functionality
         self.w, self.h = w, h
         self._deque = deque(maxlen=128)
         self._index = 0
@@ -242,6 +244,8 @@ class ImageReel:
         return self._deque[self._index][1]
 
     def _select_random(self):
+        if len(self.available_paths) == 0:
+            return None, None, None
         random_index = random.randint(0, len(self.available_paths) - 1)
         filepath, frameNumber = self.available_paths[random_index], 0
         ext: str = os.path.splitext(filepath)[1]
@@ -250,9 +254,13 @@ class ImageReel:
         elif ext.lower() in ImageReel.video_extensions:
             cap = cv2.VideoCapture(filepath)
             num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if num_frames <= 0:
+                self.available_paths.pop(random_index)
+                return self._select_random()
             frameNumber = random.randint(0, num_frames)
         else:
-            self._select_random()
+            self.available_paths.pop(random_index)
+            return self._select_random()
 
         # Check if this fulfills the requirements, otherwise select another random image
         im = self._open_image(filepath, frameNumber=frameNumber)

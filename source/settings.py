@@ -5,7 +5,7 @@ import tkinter as tk
 import tkinter.ttk as ttk
 import tkfilebrowser
 
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
 from tkinter.font import Font
 
 import utils
@@ -117,14 +117,24 @@ class SettingsWindow():
         dir_frame.grid_rowconfigure(1, weight=1)
 
         dir_label = tk.Label(dir_frame, text="Directories", font=Font(size=14, underline=True), background='#222', foreground='white')
-        self.dir_list = tk.Listbox(dir_frame, selectmode=tk.EXTENDED, background='#222', foreground='white', borderwidth=0, highlightthickness=0) # TODO: allow choosing multiple folders at once
+        dir_list_frame = tk.Frame(dir_frame)
+        self.dir_list = tk.Listbox(dir_list_frame, selectmode=tk.EXTENDED, background='#222', foreground='white', borderwidth=0, highlightthickness=0)
+        self.dir_scrollbary = tk.Scrollbar(dir_list_frame, orient=tk.VERTICAL)
+        self.dir_scrollbarx = tk.Scrollbar(dir_list_frame, orient=tk.HORIZONTAL)
         add_dir_button = HoverButton(dir_frame, text="Add", command=self.add_directory, background="#AAF", activebackground="#CCF")
         remove_dir_button = HoverButton(dir_frame, text="Remove", command=self.remove_directory, background="#F44", activebackground="#F77")
 
         dir_label.grid(row=0, column=0, columnspan=2, sticky="ew")
-        self.dir_list.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        dir_list_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
         add_dir_button.grid(row=2, column=0, sticky="ew")
         remove_dir_button.grid(row=2, column=1, sticky="ew")
+
+        self.dir_scrollbarx.pack(side=tk.BOTTOM, fill=tk.BOTH)
+        self.dir_list.pack(expand=True, side=tk.LEFT, fill=tk.BOTH)
+        self.dir_scrollbary.pack(side=tk.RIGHT, fill=tk.BOTH)
+        self.dir_list.config(yscrollcommand=self.dir_scrollbary.set, xscrollcommand=self.dir_scrollbarx.set)
+        self.dir_scrollbary.config(command=self.dir_list.yview)
+        self.dir_scrollbarx.config(command=self.dir_list.xview)
 
         # Excluded directories list
         excluded_frame = tk.Frame(self.root)
@@ -133,14 +143,24 @@ class SettingsWindow():
         excluded_frame.grid_rowconfigure(1, weight=1)
 
         excluded_label = tk.Label(excluded_frame, text="Excluded directories", font=Font(size=14, underline=True), background='#222', foreground='white')
-        self.excluded_list = tk.Listbox(excluded_frame, selectmode=tk.EXTENDED, background='#222', foreground='white', borderwidth=0, highlightthickness=0)
+        excluded_list_frame = tk.Frame(excluded_frame)
+        self.excluded_list = tk.Listbox(excluded_list_frame, selectmode=tk.EXTENDED, background='#222', foreground='white', borderwidth=0, highlightthickness=0)
+        self.excluded_scrollbary = tk.Scrollbar(excluded_list_frame, orient=tk.VERTICAL)
+        self.excluded_scrollbarx = tk.Scrollbar(excluded_list_frame, orient=tk.HORIZONTAL)
         add_ex_button = HoverButton(excluded_frame, text="Add exclusion", command=self.add_excluded_directory, background="#AAF", activebackground="#CCF")
         remove_ex_button = HoverButton(excluded_frame, text="Remove exclusion", command=self.remove_excluded_directory, background="#F44", activebackground="#F77")
 
         excluded_label.grid(row=0, column=0, columnspan=2, sticky="ew")
-        self.excluded_list.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        excluded_list_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
         add_ex_button.grid(row=2, column=0, sticky="ew")
         remove_ex_button.grid(row=2, column=1, sticky="ew")
+
+        self.excluded_scrollbarx.pack(side=tk.BOTTOM, fill=tk.BOTH)
+        self.excluded_list.pack(expand=True, side=tk.LEFT, fill=tk.BOTH)
+        self.excluded_scrollbary.pack(side=tk.RIGHT, fill=tk.BOTH)
+        self.excluded_list.config(yscrollcommand=self.excluded_scrollbary.set, xscrollcommand=self.excluded_scrollbarx.set)
+        self.excluded_scrollbary.config(command=self.excluded_list.yview)
+        self.excluded_scrollbarx.config(command=self.excluded_list.xview)
 
         # Buttons to add and remove directories
         other_frame = tk.Frame(self.root)
@@ -175,6 +195,8 @@ class SettingsWindow():
         self.load_values()
         self.save_json(flash_button=False) # For compatibility
 
+    def _modify_scrollbars(self, event=None):
+        pass # TODO: implement auto-hiding/showing scrollbars as in https://stackoverflow.com/a/75718185/
     
     def run(self):
         self.root.mainloop()
