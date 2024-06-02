@@ -274,7 +274,7 @@ class ImageReel:
             return self._select_random() # Just try another
         return im, filepath, frameNumber
 
-    def _open_image(self, filepath: str, frameNumber: int = None, raise_err: bool = False):
+    def _open_image(self, filepath: str, frameNumber: int = None, raise_err: bool = False, force_annotate: bool = False):
         """ Returns None if the image could not be opened for some reason. """
         is_image = os.path.splitext(filepath)[1].lower() in ImageReel.image_extensions
         if is_image:
@@ -297,7 +297,7 @@ class ImageReel:
         w, h = im.size
         ratio = min(self.w/w, self.h/h)
         im = im.resize((int(w*ratio), int(h*ratio)), Image.LANCZOS)
-        im = self._annotate_image(im, filepath)
+        if len(self.available_paths) > 1 or force_annotate: im = self._annotate_image(im, filepath)
         return im
 
     def _annotate_image(self, im: Image.Image, filepath: str, pad=10, interline=7):
