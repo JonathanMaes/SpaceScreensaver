@@ -281,7 +281,7 @@ class ImageReel:
             try:
                 im = Image.open(filepath)
                 im = ImageOps.exif_transpose(im) # To get correct rotation (sometimes rotation info is hidden in EXIF)
-            except (UnidentifiedImageError, Image.DecompressionBombError) as e: # DecompressionBombError if image more than 179 MegaPixels
+            except (UnidentifiedImageError, Image.DecompressionBombError, MemoryError) as e: # DecompressionBombError if image more than 179 MegaPixels
                 if raise_err: raise e
                 return None
         else:
