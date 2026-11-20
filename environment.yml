@@ -3,15 +3,16 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python
-  - nuitka=1.9.6
-  - numpy=1.26.3
-  - opencv=4.9.0
-  - ordered-set=4.1.0
-  - pillow=13.0.0
-  - platformdirs=4.1.0
-  - scipy=1.11.4
-  - zstandard
+  - python>=3.12
+  - nuitka>=4.3.5
+  - numpy>=1.26.3
+  - opencv>=4.9.0
+  - ordered-set>=4.1.0
+  - pillow>=13.0.0
+  - platformdirs>=4.1.0
+  - scipy>=1.11.4
+  - zstandard>=0.22.0
+  - pywin32>=306
   - pip
   - pip:
-      - tkfilebrowser==2.3.2
+      - tkfilebrowser>=2.3.2
